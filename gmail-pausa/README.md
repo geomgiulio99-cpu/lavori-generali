@@ -39,6 +39,16 @@ Durante la pausa, se ti serve una mail, la trovi sotto l'etichetta `⏸ In attes
 
 > Se in futuro modifichi il codice: **Esegui il deployment → Gestisci deployment → ✏️ → Versione: Nuova**, così l'URL resta lo stesso.
 
+## Pulsante dentro Gmail (Tampermonkey, facoltativo)
+Il file `gmail-pausa-mail.user.js` aggiunge nella barra in alto di Gmail un pulsante **⏸ Pausa Mail**
+con gli stessi comandi della pagina. Il pulsante mostra lo stato: arancione = in pausa, verde = rientro.
+1. Inventa una chiave di almeno 20 caratteri e apri una volta
+   `<URL app web>?api=init&key=<chiave>`: deve rispondere `{"ok":true,...}`. La prima chiave registrata resta fissa.
+2. Nel file sostituisci `INCOLLA-QUI-URL-APP-WEB` e `INCOLLA-QUI-LA-TUA-CHIAVE...`, poi installalo in Tampermonkey.
+3. Se Tampermonkey lo chiede, consenti le connessioni a `script.google.com`.
+
+Senza la chiave giusta la web app rifiuta i comandi. Così un altro sito non può avviare la pausa sfruttando il tuo login Google.
+
 ## Uso
 1. Prima di uscire apri la pagina, scegli il ritardo → **Avvia pausa**.
 2. Quando torni, scegli in quanti minuti ricevere la coda → **🏠 Sono rientrato**.

@@ -22,10 +22,45 @@ var P_HIDDEN = 'h_';       // h_<threadId> = JSON [msgId,...] tolti dalla Posta 
 
 // ───────────────────────── Web app ─────────────────────────
 
-function doGet() {
+function doGet(e) {
+  var p = (e && e.parameter) || {};
+  if (p.api) return api_(p);
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('Pausa Mail')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+/**
+ * Accesso JSON per il pannello dentro Gmail (userscript Tampermonkey):
+ *   ?api=status|start|back|releaseAll&key=<chiave>[&delay=min][&drain=min]
+ * La chiave la fissa la prima chiamata ?api=init&key=<chiave> e poi non cambia più,
+ * così una pagina estranea non può comandare la pausa sfruttando il tuo login Google.
+ */
+function api_(p) {
+  var out;
+  try {
+    var props = PropertiesService.getUserProperties();
+    var key = props.getProperty('apiKey');
+    if (p.api === 'init' && !key && p.key && String(p.key).length >= 20) {
+      props.setProperty('apiKey', p.key);
+      key = p.key;
+    }
+    if (!key || p.key !== key) throw new Error('Chiave non valida');
+    var s;
+    switch (p.api) {
+      case 'init':
+      case 'status': s = getStatus(); break;
+      case 'start': s = startPause(Number(p.delay)); break;
+      case 'back': s = comeBack(Number(p.drain)); break;
+      case 'releaseAll': s = releaseAllNow(); break;
+      default: throw new Error('Azione sconosciuta: ' + p.api);
+    }
+    out = { ok: true, status: s };
+  } catch (err) {
+    out = { ok: false, error: String((err && err.message) || err) };
+  }
+  return ContentService.createTextOutput(JSON.stringify(out))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 // ───────────────────────── Azioni (chiamate dalla pagina) ─────────────────────────
