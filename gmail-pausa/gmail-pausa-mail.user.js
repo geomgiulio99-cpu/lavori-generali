@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Pausa Mail in Gmail
 // @namespace    speedydecal.giulio
-// @version      1.2.0
-// @description  Pulsante "Pausa Mail" nella barra di Gmail: avvia la pausa, cambia il ritardo, "Sono rientrato", rilascia tutto.
+// @version      1.3.0
+// @description  Pulsante "Pausa Mail" nella barra di Gmail (avvia pausa, ritardo, "Sono rientrato", rilascia tutto) e mail in attesa sfocate.
 // @match        https://mail.google.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -280,6 +280,71 @@
     var open = ui.panel.classList.toggle('pm-open');
     if (open) { labels(); refresh(); }
   }
+
+  // ───────────── mail in attesa sfocate ─────────────
+  // Le mail trattenute hanno l'etichetta "⏸ In attesa": nell'elenco si sfocano mittente,
+  // oggetto e anteprima; aperte si sfoca tutto, con "Mostra comunque" per le emergenze.
+  // Quando vengono consegnate l'etichetta sparisce e tornano normali da sole.
+
+  var HELD = /In attesa/;
+  var shown = {};   // conversazioni sbloccate con "Mostra comunque" (fino al ricaricamento)
+
+  GM_addStyle([
+    'tr.zA.pm-blur .yX, tr.zA.pm-blur .xT, tr.zA.pm-blur .y2, tr.zA.pm-blur .brd{filter:blur(6px);user-select:none;}',
+    '.pm-blur-msg{filter:blur(8px);pointer-events:none;user-select:none;}',
+    '.pm-notice{display:flex;align-items:center;gap:12px;margin:8px 0 12px;padding:10px 14px;border-radius:8px;background:#fef7e0;border:1px solid #f9ab00;color:#7a4f01;font:14px Roboto,Arial,sans-serif;}',
+    '.pm-notice button{margin-left:auto;padding:6px 12px;border:1px solid #f9ab00;border-radius:6px;background:#fff;color:#7a4f01;cursor:pointer;font:500 13px Roboto,sans-serif;}'
+  ].join('\n'));
+
+  /** Vista dell'etichetta "⏸ In attesa": lì Gmail non mostra l'etichetta sulle righe, quindi vale tutto. */
+  function inHeldLabelView() {
+    var h = location.hash.replace(/\+/g, ' ');
+    try { h = decodeURIComponent(h); } catch (e) { /* hash non decodificabile */ }
+    return /^#label\/[^\/]*In attesa/.test(h);
+  }
+
+  function obscure() {
+    var labelView = inHeldLabelView();
+    var rows = document.querySelectorAll('tr.zA');
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      var held = labelView || !!r.querySelector('.ar .at[title*="In attesa"]');
+      if (held !== r.classList.contains('pm-blur')) r.classList.toggle('pm-blur', held);
+    }
+
+    // conversazione aperta: etichette accanto all'oggetto (.ha .hN)
+    var subj = document.querySelector('h2.hP');
+    var threadHeld = false;
+    if (subj && subj.offsetParent) {
+      var labs = document.querySelectorAll('.ha .hN');
+      for (var j = 0; j < labs.length; j++) if (HELD.test(labs[j].textContent)) threadHeld = true;
+    }
+    var key = location.hash.split('?')[0];
+    var hide = threadHeld && !shown[key];
+    var parts = document.querySelectorAll('h2.hP, .adn, .h7, .kv, .kQ');
+    for (var k = 0; k < parts.length; k++) {
+      if (hide !== parts[k].classList.contains('pm-blur-msg')) parts[k].classList.toggle('pm-blur-msg', hide);
+    }
+
+    var notice = document.getElementById('pm-notice');
+    if (hide && subj) {
+      var anchor = subj.closest('.ha') || subj;
+      if (!notice || notice.nextElementSibling !== anchor) {
+        if (notice) notice.remove();
+        notice = el('div', { id: 'pm-notice', class: 'pm-notice' }, [
+          '⏸ Mail in attesa: arriverà più tardi, non serve leggerla adesso.',
+          el('button', { type: 'button', text: 'Mostra comunque',
+            onclick: function () { shown[key] = true; obscure(); } })
+        ]);
+        anchor.parentElement.insertBefore(notice, anchor);
+      }
+    } else if (notice) {
+      notice.remove();
+    }
+  }
+
+  setInterval(obscure, 700);
+  window.addEventListener('hashchange', function () { setTimeout(obscure, 50); });
 
   // Gmail ricostruisce la barra: ricontrollo periodico del posizionamento.
   place();
