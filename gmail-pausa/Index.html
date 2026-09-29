@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#667085; --accent:#1a73e8; --ok:#188038; --warn:#e37400; --line:#e3e6eb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14161a; --card:#1e2128; --text:#e8eaed; --muted:#9aa0a6; --accent:#8ab4f8; --ok:#81c995; --warn:#fdd663; --line:#30343c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:480px; margin:0 auto; padding:16px; }
+  h1 { font-size:22px; margin:8px 0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+  .status { font-size:15px; }
+  .status b { font-size:18px; }
+  .badge { display:inline-block; padding:2px 10px; border-radius:99px; font-size:13px; font-weight:600; color:#fff; }
+  .off { background:var(--muted); } .pause { background:var(--warn); color:#000; } .drain { background:var(--ok); color:#000; }
+  label { display:block; font-weight:600; margin-bottom:6px; }
+  .val { font-size:28px; font-weight:700; color:var(--accent); }
+  .hint { color:var(--muted); font-size:14px; margin-top:4px; }
+  input[type=range] { width:100%; height:36px; accent-color:var(--accent); }
+  button { width:100%; padding:14px; margin-top:10px; font-size:17px; font-weight:600; border-radius:12px; border:0; cursor:pointer; }
+  .primary { background:var(--accent); color:#fff; }
+  .green { background:var(--ok); color:#000; }
+  .ghost { background:transparent; color:var(--muted); border:1px solid var(--line); font-size:15px; }
+  button:disabled { opacity:.5; }
+  .bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin-top:8px; }
+  .bar > div { height:100%; background:var(--ok); width:0; transition:width .4s; }
+  .err { color:#d93025; font-size:14px; margin-top:8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>⏸ Pausa Mail</h1>
+
+  <div class="card status" id="status">Caricamento…</div>
+
+  <div class="card">
+    <label for="delay">Ritardo mail</label>
+    <div class="val" id="delayVal">1 h</div>
+    <input type="range" id="delay" min="10" max="360" step="10" value="60">
+    <div class="hint" id="delayHint"></div>
+    <button class="primary" id="btnStart">Avvia pausa</button>
+  </div>
+
+  <div class="card">
+    <label for="drain">Rientro: ricevi la coda in</label>
+    <div class="val" id="drainVal">15 min</div>
+    <input type="range" id="drain" min="5" max="120" step="5" value="15">
+    <button class="green" id="btnBack">🏠 Sono rientrato</button>
+  </div>
+
+  <button class="ghost" id="btnAll">Rilascia tutto adesso</button>
+  <div class="err" id="err"></div>
+</main>
+
+<script>
+  var $ = function (id) { return document.getElementById(id); };
+  var last = null, busy = false;
+
+  function fmtDur(m) {
+    m = Number(m);
+    var h = Math.floor(m / 60), r = m % 60;
+    if (!h) return r + ' min';
+    return h + ' h' + (r ? ' ' + r + ' min' : '');
+  }
+  function fmtTime(ms) {
+    return new Date(ms).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function updateLabels() {
+    $('delayVal').textContent = fmtDur($('delay').value);
+    var ex = Date.now();
+    $('delayHint').textContent = 'Una mail che arriva adesso la vedrai alle ' + fmtTime(ex + $('delay').value * 60000);
+    $('drainVal').textContent = fmtDur($('drain').value);
+    if (last) $('btnStart').textContent = last.mode === 'pause' ? 'Aggiorna ritardo' : 'Avvia pausa';
+  }
+
+  function render(s) {
+    last = s;
+    var html;
+    if (s.mode === 'pause') {
+      html = '<span class="badge pause">IN PAUSA</span><br><br>Ritardo attivo: <b>' + fmtDur(s.delayMin) + '</b><br>' +
+             'Mail in attesa: <b>' + s.pending + '</b>' +
+             (s.nextRelease ? '<br>Prossima consegna: <b>' + fmtTime(s.nextRelease) + '</b>' : '');
+      $('delay').value = s.delayMin;
+    } else if (s.mode === 'drain') {
+      var pct = s.drainTotal ? Math.round(100 * s.drainReleased / s.drainTotal) : 100;
+      html = '<span class="badge drain">RIENTRO IN CORSO</span><br><br>Consegnate <b>' + s.drainReleased + ' / ' + s.drainTotal +
+             '</b><br>Tutto consegnato entro le <b>' + fmtTime(s.drainEnd) + '</b>' +
+             '<div class="bar"><div style="width:' + pct + '%"></div></div>';
+    } else {
+      html = '<span class="badge off">NORMALE</span><br><br>Le mail arrivano normalmente.' +
+             (s.pending ? '<br>In attesa: <b>' + s.pending + '</b>' : '');
+    }
+    $('status').innerHTML = html;
+    $('btnBack').disabled = s.mode === 'off' && !s.pending;
+    $('btnAll').disabled = !s.pending && s.mode === 'off';
+    updateLabels();
+  }
+
+  function call(fn, arg) {
+    if (busy) return;
+    busy = true; $('err').textContent = '';
+    document.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+    google.script.run
+      .withSuccessHandler(function (s) { busy = false; document.querySelectorAll('button').forEach(function (b) { b.disabled = false; }); render(s); })
+      .withFailureHandler(function (e) { busy = false; document.querySelectorAll('button').forEach(function (b) { b.disabled = false; }); $('err').textContent = 'Errore: ' + e.message; })
+      [fn](arg);
+  }
+
+  function refresh() {
+    if (busy) return;
+    google.script.run.withSuccessHandler(render)
+      .withFailureHandler(function (e) { $('err').textContent = 'Errore: ' + e.message; })
+      .getStatus();
+  }
+
+  $('delay').oninput = updateLabels;
+  $('drain').oninput = updateLabels;
+  $('btnStart').onclick = function () { call('startPause', Number($('delay').value)); };
+  $('btnBack').onclick = function () { call('comeBack', Number($('drain').value)); };
+  $('btnAll').onclick = function () {
+    if (confirm('Rimettere subito tutte le mail in attesa nella Posta in arrivo?')) call('releaseAllNow');
+  };
+
+  updateLabels();
+  refresh();
+  setInterval(refresh, 30000);
+</script>
+</body>
+</html>
