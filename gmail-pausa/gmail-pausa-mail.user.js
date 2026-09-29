@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pausa Mail in Gmail
 // @namespace    speedydecal.giulio
-// @version      1.0.1
+// @version      1.1.0
 // @description  Pulsante "Pausa Mail" nella barra di Gmail: avvia la pausa, cambia il ritardo, "Sono rientrato", rilascia tutto.
 // @match        https://mail.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -15,29 +15,46 @@
 (function () {
   'use strict';
 
-  // Web app Apps Script "Pausa Mail" (Esegui come: Me, Accesso: Solo io).
-  var APP_URL = 'INCOLLA-QUI-URL-APP-WEB';
-  // Chiave fissata con ?api=init: senza questa la web app rifiuta i comandi.
-  var API_KEY = 'INCOLLA-QUI-LA-TUA-CHIAVE-DI-ALMENO-20-CARATTERI';
+  // Una web app Apps Script "Pausa Mail" per ogni casella (Esegui come: Me, Accesso: Solo io).
+  // key = chiave fissata con ?api=init: senza questa la web app rifiuta i comandi.
+  // Il pulsante comanda SOLO la casella aperta nella scheda: se non è in elenco, resta spento.
+  var ACCOUNTS = {
+    'TUO-INDIRIZZO@gmail.com': {
+      url: 'INCOLLA-QUI-URL-APP-WEB',
+      key: 'INCOLLA-QUI-LA-TUA-CHIAVE-DI-ALMENO-20-CARATTERI'
+    }
+  };
   var POLL_MS = 60000;
 
   var last = null, busy = false, lastErr = '';
 
+  /** Indirizzo della casella aperta: Gmail lo mette nel titolo ("Posta in arrivo - x@y - Gmail"). */
+  function currentEmail() {
+    var m = document.title.match(/[\w.+-]+@[\w-]+(\.[\w-]+)+/);
+    if (m) return m[0].toLowerCase();
+    var a = document.querySelector('header a[aria-label*="@"]');
+    m = a && a.getAttribute('aria-label').match(/[\w.+-]+@[\w-]+(\.[\w-]+)+/);
+    return m ? m[0].toLowerCase() : '';
+  }
+  function config() { return ACCOUNTS[currentEmail()] || null; }
+
   // ───────────── chiamate alla web app ─────────────
 
   function api(action, params) {
-    var q = 'api=' + encodeURIComponent(action) + '&key=' + encodeURIComponent(API_KEY);
+    var cfg = config();
+    if (!cfg) return Promise.reject(new Error('Pausa Mail non è installata su ' + (currentEmail() || 'questa casella')));
+    var q = 'api=' + encodeURIComponent(action) + '&key=' + encodeURIComponent(cfg.key);
     Object.keys(params || {}).forEach(function (k) { q += '&' + k + '=' + encodeURIComponent(params[k]); });
     return new Promise(function (resolve, reject) {
       GM_xmlhttpRequest({
         method: 'GET',
-        url: APP_URL + '?' + q + '&_=' + Date.now(),
+        url: cfg.url + '?' + q + '&_=' + Date.now(),
         timeout: 90000,
         onload: function (r) {
           var data;
           try { data = JSON.parse(r.responseText); } catch (e) {
             return reject(new Error(r.status === 200
-              ? 'Risposta non valida (sei connesso con geomgiulio99@gmail.com?)'
+              ? 'Risposta non valida da Google (accesso a ' + currentEmail() + '?)'
               : 'HTTP ' + r.status));
           }
           if (!data.ok) return reject(new Error(data.error || 'Errore'));
@@ -131,7 +148,7 @@
     ui.err = el('div', { class: 'pm-errtxt' });
 
     ui.panel = el('div', { id: 'pm-panel' }, [
-      el('h3', { text: '⏸ Pausa Mail' }),
+      (ui.head = el('h3', { text: '⏸ Pausa Mail' })),
       ui.status,
       el('div', {}, [el('div', { class: 'pm-lbl', text: 'Ritardo mail' }), ui.delayVal, ui.delay, ui.delayHint, ui.btnStart]),
       el('div', { class: 'pm-sec' }, [el('div', { class: 'pm-lbl', text: 'Rientro: ricevi la coda in' }), ui.drainVal, ui.drain, ui.btnBack]),
@@ -165,6 +182,7 @@
   }
 
   function labels() {
+    ui.head.textContent = '⏸ Pausa Mail · ' + (currentEmail() || '?');
     ui.delayVal.textContent = fmtDur(ui.delay.value);
     ui.delayHint.textContent = 'Una mail che arriva adesso la vedrai alle ' + fmtTime(Date.now() + ui.delay.value * 60000);
     ui.drainVal.textContent = fmtDur(ui.drain.value);
@@ -233,7 +251,22 @@
 
   function refresh() {
     if (busy || document.hidden) return;
+    if (!config()) return renderOff();
     api('status').then(render, showError);
+  }
+
+  /** Casella senza Pausa Mail: pulsante grigio, nessun comando (niente da fare per sbaglio sull'altro account). */
+  function renderOff() {
+    last = null;
+    var who = currentEmail() || 'questa casella';
+    ui.pill.classList.remove('pm-pause', 'pm-drain', 'pm-err');
+    ui.pill.textContent = '⏸ Pausa Mail · non attiva qui';
+    ui.pill.title = 'Pausa Mail non è installata su ' + who;
+    while (ui.status.firstChild) ui.status.removeChild(ui.status.firstChild);
+    ui.status.appendChild(el('span', { class: 'pm-badge', text: 'NON INSTALLATA' }));
+    ui.status.appendChild(el('div', { text: 'Su ' + who + ' Pausa Mail non è installata: le mail arrivano normalmente e da qui non si comanda nessun\'altra casella.' }));
+    ui.err.textContent = '';
+    ui.btnStart.disabled = ui.btnBack.disabled = ui.btnAll.disabled = true;
   }
 
   function togglePanel(e) {
