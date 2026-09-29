@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pausa Mail in Gmail
 // @namespace    speedydecal.giulio
-// @version      1.1.0
+// @version      1.2.0
 // @description  Pulsante "Pausa Mail" nella barra di Gmail: avvia la pausa, cambia il ritardo, "Sono rientrato", rilascia tutto.
 // @match        https://mail.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -21,7 +21,13 @@
   var ACCOUNTS = {
     'TUO-INDIRIZZO@gmail.com': {
       url: 'INCOLLA-QUI-URL-APP-WEB',
-      key: 'INCOLLA-QUI-LA-TUA-CHIAVE-DI-ALMENO-20-CARATTERI'
+      key: 'CHIAVE-CASELLA-1'
+    },
+    // Account Workspace: serve l'indirizzo di dominio (/a/macros/<dominio>/), quello normale
+    // con più account aperti in Chrome dà "Impossibile aprire il file".
+    'TUO-INDIRIZZO@tuodominio.it': {
+      url: 'https://script.google.com/a/macros/TUO-DOMINIO/s/ID-DEPLOYMENT/exec',
+      key: 'CHIAVE-CASELLA-2'
     }
   };
   var POLL_MS = 60000;
