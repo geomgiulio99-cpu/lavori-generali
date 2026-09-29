@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pausa Mail in Gmail
 // @namespace    speedydecal.giulio
-// @version      1.0.0
+// @version      1.0.1
 // @description  Pulsante "Pausa Mail" nella barra di Gmail: avvia la pausa, cambia il ritardo, "Sono rientrato", rilascia tutto.
 // @match        https://mail.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -93,9 +93,10 @@
     '.pm-sec{border-top:1px solid #e8eaed;padding-top:10px;margin-top:10px;}',
     '.pm-lbl{font-weight:500;}.pm-val{font-size:22px;font-weight:700;color:#1a73e8;margin:2px 0;}',
     '.pm-hint{color:#5f6368;font-size:12px;}',
-    '#pm-panel input[type=range]{width:100%;accent-color:#1a73e8;}',
-    '.pm-btn{width:100%;padding:9px;margin-top:8px;border:0;border-radius:8px;font:500 14px Roboto,sans-serif;cursor:pointer;}',
-    '.pm-btn:disabled{opacity:.5;cursor:default;}',
+    '#pm-panel input[type=range]{display:block;width:100%;box-sizing:border-box;margin:4px 0;accent-color:#1a73e8;}',
+    '#pm-panel,#pm-panel *{box-sizing:border-box;}',
+    '#pm-panel .pm-btn{display:block;width:100%;padding:9px;margin-top:8px;border:0;border-radius:8px;font:500 14px Roboto,sans-serif;cursor:pointer;}',
+    '#pm-panel .pm-btn:disabled{opacity:.5;cursor:default;}',
     '.pm-blue{background:#1a73e8;color:#fff;}.pm-green{background:#34a853;color:#fff;}',
     '.pm-ghost{background:transparent;border:1px solid #dadce0;color:#5f6368;}',
     '.pm-errtxt{color:#d93025;font-size:12px;margin-top:8px;}',
