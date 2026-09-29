@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pausa Mail in Gmail
 // @namespace    speedydecal.giulio
-// @version      1.3.0
+// @version      1.4.0
 // @description  Pulsante "Pausa Mail" nella barra di Gmail (avvia pausa, ritardo, "Sono rientrato", rilascia tutto) e mail in attesa sfocate.
 // @match        https://mail.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -204,12 +204,13 @@
 
     if (s.mode === 'pause') {
       ui.pill.classList.add('pm-pause');
-      ui.pill.textContent = '⏸ In pausa · ' + fmtDur(s.delayMin) + (s.pending ? ' · ' + s.pending : '');
-      ui.pill.title = 'Pausa Mail: ritardo ' + fmtDur(s.delayMin) + ', ' + s.pending + ' mail in attesa';
+      // Durante la pausa non si mostra quante mail aspettano né quando arriva la prossima:
+      // Giulio non vuole sapere che è arrivato qualcosa.
+      ui.pill.textContent = '⏸ In pausa · ' + fmtDur(s.delayMin);
+      ui.pill.title = 'Pausa Mail: ritardo ' + fmtDur(s.delayMin);
       ui.status.appendChild(el('span', { class: 'pm-badge pm-pause', text: 'IN PAUSA' }));
       ui.status.appendChild(el('div', {}, ['Ritardo attivo: ', el('b', { text: fmtDur(s.delayMin) })]));
-      ui.status.appendChild(el('div', {}, ['Mail in attesa: ', el('b', { text: String(s.pending) })]));
-      if (s.nextRelease) ui.status.appendChild(el('div', {}, ['Prossima consegna: ', el('b', { text: fmtTime(s.nextRelease) })]));
+      ui.status.appendChild(el('div', { text: 'Le mail arrivano con ' + fmtDur(s.delayMin) + ' di ritardo.' }));
       ui.delay.value = s.delayMin;
     } else if (s.mode === 'drain') {
       var pct = s.drainTotal ? Math.round(100 * s.drainReleased / s.drainTotal) : 100;
@@ -222,11 +223,11 @@
       var bar = el('div', { class: 'pm-bar' }, [el('div', { style: 'width:' + pct + '%' })]);
       ui.status.appendChild(bar);
     } else {
-      ui.pill.textContent = '⏸ Pausa Mail' + (s.pending ? ' · ' + s.pending : '');
+      ui.pill.textContent = '⏸ Pausa Mail';
       ui.pill.title = 'Pausa Mail: le mail arrivano normalmente';
       ui.status.appendChild(el('span', { class: 'pm-badge', text: 'NORMALE' }));
       ui.status.appendChild(el('div', { text: 'Le mail arrivano normalmente.' }));
-      if (s.pending) ui.status.appendChild(el('div', {}, ['In attesa: ', el('b', { text: String(s.pending) })]));
+      if (s.pending) ui.status.appendChild(el('div', { text: 'Ci sono mail ancora da consegnare: "Rilascia tutto adesso" le manda subito.' }));
     }
     setButtons(false);
     labels();
@@ -292,6 +293,9 @@
   GM_addStyle([
     'tr.zA.pm-blur .yX, tr.zA.pm-blur .xT, tr.zA.pm-blur .y2, tr.zA.pm-blur .brd{filter:blur(6px);user-select:none;}',
     '.pm-blur-msg{filter:blur(8px);pointer-events:none;user-select:none;}',
+    // etichetta "⏸ In attesa" nella colonna di sinistra: niente contatore, niente grassetto
+    '.aim.pm-held-label .bsU{visibility:hidden;}',
+    '.aim.pm-held-label a, .aim.pm-held-label a *{font-weight:normal !important;}',
     '.pm-notice{display:flex;align-items:center;gap:12px;margin:8px 0 12px;padding:10px 14px;border-radius:8px;background:#fef7e0;border:1px solid #f9ab00;color:#7a4f01;font:14px Roboto,Arial,sans-serif;}',
     '.pm-notice button{margin-left:auto;padding:6px 12px;border:1px solid #f9ab00;border-radius:6px;background:#fff;color:#7a4f01;cursor:pointer;font:500 13px Roboto,sans-serif;}'
   ].join('\n'));
@@ -304,6 +308,12 @@
   }
 
   function obscure() {
+    var side = document.querySelectorAll('.aim a[aria-label*="In attesa"]');
+    for (var s = 0; s < side.length; s++) {
+      var aim = side[s].closest('.aim');
+      if (aim && !aim.classList.contains('pm-held-label')) aim.classList.add('pm-held-label');
+    }
+
     var labelView = inHeldLabelView();
     var rows = document.querySelectorAll('tr.zA');
     for (var i = 0; i < rows.length; i++) {
