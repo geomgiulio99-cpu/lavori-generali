@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pausa Mail in Gmail
 // @namespace    speedydecal.giulio
-// @version      1.5.0
+// @version      1.6.0
 // @description  Pulsante "Pausa Mail" nella barra di Gmail (avvia pausa, ritardo, "Sono rientrato", rilascia tutto) e mail in attesa sfocate.
 // @match        https://mail.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -219,6 +219,10 @@
   function saveCached(s) { try { localStorage.setItem(cacheKey(), JSON.stringify(s)); } catch (e) { /* storage non disponibile */ } }
   function loadCached() { try { return JSON.parse(localStorage.getItem(cacheKey()) || 'null'); } catch (e) { return null; } }
 
+  function minutesLeft(s) {
+    return Math.max(0, Math.ceil((s.drainEnd - Date.now()) / 60000));
+  }
+
   function render(s) {
     last = s;
     saveCached(s);
@@ -238,13 +242,15 @@
       ui.status.appendChild(el('div', { text: 'Le mail arrivano con ' + fmtDur(s.delayMin) + ' di ritardo.' }));
       if (!delayTouched) ui.delay.value = s.delayMin;
     } else if (s.mode === 'drain') {
-      var pct = s.drainTotal ? Math.round(100 * s.drainReleased / s.drainTotal) : 100;
+      // Durante il rientro si mostrano i minuti che mancano alla normalità, non quante mail restano.
+      var left = minutesLeft(s);
+      var span = Number(ui.drain.value) * 60000;   // durata del rientro scelta nello slider
+      var pct = span > 0 ? Math.min(100, Math.max(0, Math.round(100 * (1 - (s.drainEnd - Date.now()) / span)))) : 100;
       ui.pill.classList.add('pm-drain');
-      ui.pill.textContent = '🏠 Rientro ' + s.drainReleased + '/' + s.drainTotal;
-      ui.pill.title = 'Pausa Mail: consegna della coda entro le ' + fmtTime(s.drainEnd);
+      ui.pill.textContent = '🏠 Rientro · ' + left + ' min';
+      ui.pill.title = 'Pausa Mail: tutto normale alle ' + fmtTime(s.drainEnd);
       ui.status.appendChild(el('span', { class: 'pm-badge pm-drain', text: 'RIENTRO IN CORSO' }));
-      ui.status.appendChild(el('div', {}, ['Consegnate ', el('b', { text: s.drainReleased + ' / ' + s.drainTotal })]));
-      ui.status.appendChild(el('div', {}, ['Tutto consegnato entro le ', el('b', { text: fmtTime(s.drainEnd) })]));
+      ui.status.appendChild(el('div', {}, ['Tutto normale tra ', el('b', { text: left + ' min' }), ' (alle ' + fmtTime(s.drainEnd) + ')']));
       var bar = el('div', { class: 'pm-bar' }, [el('div', { style: 'width:' + pct + '%' })]);
       ui.status.appendChild(bar);
     } else {
@@ -430,5 +436,10 @@
   setInterval(place, 2000);
   refresh();
   setInterval(refresh, POLL_MS);
+  // Conto alla rovescia del rientro senza chiedere a Google; a zero rilegge lo stato vero.
+  setInterval(function () {
+    if (busy || !last || last.mode !== 'drain') return;
+    if (minutesLeft(last) <= 0) refresh(); else render(last);
+  }, 20000);
   document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
 })();
