@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pausa Mail in Gmail
 // @namespace    speedydecal.giulio
-// @version      1.4.0
+// @version      1.5.0
 // @description  Pulsante "Pausa Mail" nella barra di Gmail (avvia pausa, ritardo, "Sono rientrato", rilascia tutto) e mail in attesa sfocate.
 // @match        https://mail.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -33,6 +33,9 @@
   var POLL_MS = 60000;
 
   var last = null, busy = false, lastErr = '';
+  var TXT_ALL = 'Rilascia tutto adesso', TXT_BACK = '🏠 Sono rientrato';
+  var armedAll = false, armedTimer = null;
+  var delayTouched = false;   // slider del ritardo mosso a mano: l'aggiornamento automatico non lo sposta
 
   /** Indirizzo della casella aperta: Gmail lo mette nel titolo ("Posta in arrivo - x@y - Gmail"). */
   function currentEmail() {
@@ -55,13 +58,17 @@
       GM_xmlhttpRequest({
         method: 'GET',
         url: cfg.url + '?' + q + '&_=' + Date.now(),
-        timeout: 90000,
+        timeout: 45000,
         onload: function (r) {
           var data;
           try { data = JSON.parse(r.responseText); } catch (e) {
-            return reject(new Error(r.status === 200
-              ? 'Risposta non valida da Google (accesso a ' + currentEmail() + '?)'
-              : 'HTTP ' + r.status));
+            // Con più account in Chrome la pagina di risposta di Google (script.googleusercontent.com)
+            // a volte dice "Impossibile aprire il file": lo script però è già stato eseguito.
+            var err = new Error(/googleusercontent\.com/.test(r.finalUrl || '')
+              ? 'Google non ha restituito la risposta'
+              : (r.status === 200 ? 'Risposta non valida da Google' : 'HTTP ' + r.status));
+            err.executed = /googleusercontent\.com/.test(r.finalUrl || '');
+            return reject(err);
           }
           if (!data.ok) return reject(new Error(data.error || 'Errore'));
           resolve(data.status);
@@ -121,7 +128,8 @@
     '#pm-panel .pm-btn{display:block;width:100%;padding:9px;margin-top:8px;border:0;border-radius:8px;font:500 14px Roboto,sans-serif;cursor:pointer;}',
     '#pm-panel .pm-btn:disabled{opacity:.5;cursor:default;}',
     '.pm-blue{background:#1a73e8;color:#fff;}.pm-green{background:#34a853;color:#fff;}',
-    '.pm-ghost{background:transparent;border:1px solid #dadce0;color:#5f6368;}',
+    '.pm-danger{background:#fff;border:1px solid #d93025 !important;color:#d93025;}',
+    '.pm-danger.pm-armed{background:#d93025;color:#fff;}',
     '.pm-errtxt{color:#d93025;font-size:12px;margin-top:8px;}',
     '.pm-bar{height:6px;background:#e8eaed;border-radius:3px;overflow:hidden;margin-top:6px;}',
     '.pm-bar>div{height:100%;background:#34a853;}'
@@ -136,20 +144,31 @@
 
     ui.status = el('div', { class: 'pm-status', text: 'Caricamento…' });
 
-    ui.delay = el('input', { type: 'range', min: '10', max: '360', step: '10', value: '60', oninput: labels });
+    ui.delay = el('input', { type: 'range', min: '10', max: '360', step: '10', value: '60',
+      oninput: function () { delayTouched = true; labels(); } });
     ui.delayVal = el('div', { class: 'pm-val' });
     ui.delayHint = el('div', { class: 'pm-hint' });
     ui.btnStart = el('button', { class: 'pm-btn pm-blue', type: 'button', text: 'Avvia pausa',
-      onclick: function () { run('start', { delay: ui.delay.value }); } });
+      onclick: function () { run('start', { delay: ui.delay.value }, ui.btnStart); } });
 
     ui.drain = el('input', { type: 'range', min: '5', max: '120', step: '5', value: '15', oninput: labels });
     ui.drainVal = el('div', { class: 'pm-val' });
-    ui.btnBack = el('button', { class: 'pm-btn pm-green', type: 'button', text: '🏠 Sono rientrato',
-      onclick: function () { run('back', { drain: ui.drain.value }); } });
+    ui.btnBack = el('button', { class: 'pm-btn pm-green', type: 'button', text: TXT_BACK,
+      onclick: function () { run('back', { drain: ui.drain.value }, ui.btnBack); } });
 
-    ui.btnAll = el('button', { class: 'pm-btn pm-ghost', type: 'button', text: 'Rilascia tutto adesso',
+    // Conferma dentro il pannello: confirm() di Chrome può essere bloccato e allora il clic non faceva nulla.
+    ui.btnAll = el('button', { class: 'pm-btn pm-danger', type: 'button', text: TXT_ALL,
       onclick: function () {
-        if (confirm('Rimettere subito tutte le mail in attesa nella Posta in arrivo?')) run('releaseAll');
+        if (!armedAll) {
+          armedAll = true;
+          ui.btnAll.classList.add('pm-armed');
+          ui.btnAll.textContent = 'Sicuro? Premi di nuovo per rilasciare tutto';
+          clearTimeout(armedTimer);
+          armedTimer = setTimeout(disarmAll, 5000);
+          return;
+        }
+        disarmAll();
+        run('releaseAll', null, ui.btnAll);
       } });
     ui.err = el('div', { class: 'pm-errtxt' });
 
@@ -195,8 +214,14 @@
     ui.btnStart.textContent = last && last.mode === 'pause' ? 'Aggiorna ritardo' : 'Avvia pausa';
   }
 
+  // Ultimo stato conosciuto per casella: il pannello si apre subito, poi si aggiorna (Google impiega qualche secondo).
+  function cacheKey() { return 'pm-status-' + currentEmail(); }
+  function saveCached(s) { try { localStorage.setItem(cacheKey(), JSON.stringify(s)); } catch (e) { /* storage non disponibile */ } }
+  function loadCached() { try { return JSON.parse(localStorage.getItem(cacheKey()) || 'null'); } catch (e) { return null; } }
+
   function render(s) {
     last = s;
+    saveCached(s);
     lastErr = '';
     ui.err.textContent = '';
     ui.pill.classList.remove('pm-pause', 'pm-drain', 'pm-err');
@@ -211,7 +236,7 @@
       ui.status.appendChild(el('span', { class: 'pm-badge pm-pause', text: 'IN PAUSA' }));
       ui.status.appendChild(el('div', {}, ['Ritardo attivo: ', el('b', { text: fmtDur(s.delayMin) })]));
       ui.status.appendChild(el('div', { text: 'Le mail arrivano con ' + fmtDur(s.delayMin) + ' di ritardo.' }));
-      ui.delay.value = s.delayMin;
+      if (!delayTouched) ui.delay.value = s.delayMin;
     } else if (s.mode === 'drain') {
       var pct = s.drainTotal ? Math.round(100 * s.drainReleased / s.drainTotal) : 100;
       ui.pill.classList.add('pm-drain');
@@ -233,33 +258,77 @@
     labels();
   }
 
+  function resetTexts() {
+    ui.btnBack.textContent = TXT_BACK;
+    if (!armedAll) ui.btnAll.textContent = TXT_ALL;
+    labels();
+  }
+
   function setButtons(disabled) {
     ui.btnStart.disabled = disabled;
     ui.btnBack.disabled = disabled || (!!last && last.mode === 'off' && !last.pending);
     ui.btnAll.disabled = disabled || (!!last && last.mode === 'off' && !last.pending);
   }
 
+  function disarmAll() {
+    armedAll = false;
+    clearTimeout(armedTimer);
+    ui.btnAll.classList.remove('pm-armed');
+    ui.btnAll.textContent = TXT_ALL;
+  }
+
+  /** Errore di un comando premuto da Giulio: si mostra in rosso. */
   function showError(e) {
     lastErr = e.message;
-    ui.err.textContent = 'Errore: ' + e.message;
+    ui.err.textContent = 'Errore: ' + e.message + '. Riprova tra qualche secondo.';
     ui.pill.classList.add('pm-err');
     ui.pill.title = 'Pausa Mail: ' + e.message;
     if (!last) ui.status.textContent = 'Stato non disponibile.';
     setButtons(false);
   }
 
-  function run(action, params) {
+  /** Errore dell'aggiornamento automatico: niente rosso, solo un segno sul pulsante. */
+  function showQuietError(e) {
+    ui.pill.classList.add('pm-err');
+    ui.pill.title = 'Pausa Mail: stato non aggiornato (' + e.message + '), riprovo tra un minuto';
+    if (!last) ui.status.textContent = 'Stato non disponibile, riprovo tra un minuto.';
+  }
+
+  function run(action, params, btn) {
     if (busy) return;
     busy = true;
     setButtons(true);
-    ui.err.textContent = 'Attendere…';
-    api(action, params).then(render, showError).then(function () { busy = false; });
+    if (btn) btn.textContent = 'Attendere…';
+    ui.err.textContent = 'Invio del comando a Google… (può richiedere qualche secondo)';
+    api(action, params).catch(function (e) {
+      if (!e.executed) throw e;
+      // Il comando è arrivato ma la risposta si è persa: non lo si ripete, si rilegge lo stato.
+      ui.err.textContent = 'Comando inviato, verifico lo stato…';
+      return retryStatus(5);
+    }).then(function (s) {
+      if (action === 'start') delayTouched = false;
+      render(s);
+    }, showError).then(function () {
+      busy = false;
+      resetTexts();
+    });
+  }
+
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  /** Legge lo stato riprovando: la risposta di Google con più account a volte si perde. */
+  function retryStatus(tries) {
+    return api('status').catch(function (e) {
+      if (tries <= 1) throw e;
+      return wait(1500).then(function () { return retryStatus(tries - 1); });
+    });
   }
 
   function refresh() {
     if (busy || document.hidden) return;
     if (!config()) return renderOff();
-    api('status').then(render, showError);
+    if (!last) { var c = loadCached(); if (c) render(c); }
+    retryStatus(4).then(render, showQuietError);
   }
 
   /** Casella senza Pausa Mail: pulsante grigio, nessun comando (niente da fare per sbaglio sull'altro account). */

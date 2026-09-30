@@ -58,6 +58,7 @@ function api_(p) {
     out = { ok: true, status: s };
   } catch (err) {
     out = { ok: false, error: String((err && err.message) || err) };
+    if (out.error !== 'Chiave non valida') console.error('api ' + p.api + ': ' + out.error);
   }
   return ContentService.createTextOutput(JSON.stringify(out))
     .setMimeType(ContentService.MimeType.JSON);
@@ -171,14 +172,7 @@ function processQueue_(st) {
  */
 function listPending_() {
   var labelId = getLabelId_();
-  var ids = [], token;
-  do {
-    var res = Gmail.Users.Messages.list('me', {
-      labelIds: [labelId], maxResults: 500, pageToken: token, includeSpamTrash: true
-    });
-    (res.messages || []).forEach(function (m) { ids.push(m.id); });
-    token = res.nextPageToken;
-  } while (token);
+  var ids = listIds_([labelId]);
 
   var props = PropertiesService.getUserProperties();
   var all = props.getProperties();
@@ -222,13 +216,13 @@ function release_(batch) {
   var props = PropertiesService.getUserProperties();
   var toInbox = [], onlyUnlabel = [], threads = {};
 
+  // Tre ricerche invece di una lettura per ogni mail: con una coda lunga è molto più veloce.
+  var skip = {};
+  ['SENT', 'SPAM', 'TRASH'].forEach(function (l) {
+    listIds_([labelId, l]).forEach(function (id) { skip[id] = true; });
+  });
   batch.forEach(function (p) {
-    var labels = [];
-    try {
-      labels = Gmail.Users.Messages.get('me', p.id, { format: 'minimal' }).labelIds || [];
-    } catch (e) { /* messaggio eliminato definitivamente */ return; }
-    var skip = labels.indexOf('SENT') >= 0 || labels.indexOf('SPAM') >= 0 || labels.indexOf('TRASH') >= 0;
-    (skip ? onlyUnlabel : toInbox).push(p.id);
+    (skip[p.id] ? onlyUnlabel : toInbox).push(p.id);
     threads[p.threadId] = true;
   });
 
@@ -377,23 +371,27 @@ function saveState_(st) {
   PropertiesService.getUserProperties().setProperty(P_STATE, JSON.stringify(st));
 }
 
+/**
+ * Stato per la pagina e per il pulsante in Gmail. È chiamato spesso (ogni minuto da ogni scheda),
+ * quindi non rilegge la coda: basta il conteggio dell'etichetta, una sola chiamata.
+ */
 function statusOf_(st) {
-  var pending = listPending_();
-  var now = Date.now();
-  var next = null;
-  if (pending.length) {
-    next = st.drain ? null : pending[0].date + st.delayMin * 60000;
+  var pending = 0;
+  try {
+    pending = Gmail.Users.Labels.get('me', getLabelId_()).messagesTotal || 0;
+  } catch (e) {
+    CacheService.getUserCache().remove('labelId');   // etichetta cancellata a mano: si ricrea al prossimo giro
   }
   return {
     mode: st.drain ? 'drain' : (st.active ? 'pause' : 'off'),
     delayMin: st.delayMin,
-    pending: pending.length,
-    oldest: pending.length ? pending[0].date : null,
-    nextRelease: next,
+    pending: pending,
+    oldest: null,
+    nextRelease: null,
     drainEnd: st.drain ? st.drain.end : null,
     drainReleased: st.drain ? st.drain.released : 0,
     drainTotal: st.drain ? st.drain.total : 0,
-    now: now
+    now: Date.now()
   };
 }
 
@@ -409,6 +407,19 @@ function clamp_(v, lo, hi) {
   v = Math.round(Number(v));
   if (isNaN(v)) v = lo;
   return Math.min(hi, Math.max(lo, v));
+}
+
+/** Id di tutti i messaggi che hanno TUTTE le etichette indicate (spam e cestino compresi). */
+function listIds_(labelIds) {
+  var ids = [], token;
+  do {
+    var res = Gmail.Users.Messages.list('me', {
+      labelIds: labelIds, maxResults: 500, pageToken: token, includeSpamTrash: true
+    });
+    (res.messages || []).forEach(function (m) { ids.push(m.id); });
+    token = res.nextPageToken;
+  } while (token);
+  return ids;
 }
 
 function chunk_(arr, n) {
